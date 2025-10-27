@@ -88,7 +88,7 @@ def save_to_csv(vocabulary, output_file):
         output_file: Pfad zur Ausgabedatei
     """
     with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
-        writer = csv.writer(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        writer = csv.writer(csvfile, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
         writer.writerow(['Deutsch', 'Portugiesisch'])
         writer.writerows(vocabulary)
     
