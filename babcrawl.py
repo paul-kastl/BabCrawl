@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Babbel Vokabel Extraktor
-Extrahiert deutsch-portugiesische Vokabelpaare aus kopierten Babbel-Texten.
+Babbel Batch Vokabel Extraktor
+Extrahiert Vokabeln aus mehreren Textdateien und erstellt eine CSV.
 """
 
 import argparse
 import csv
-import re
 from pathlib import Path
+from tkinter import Tk, filedialog
 
 
 def extract_vocabulary(text_content):
@@ -51,32 +51,84 @@ def extract_vocabulary(text_content):
         if i + 1 < len(lines):
             next_line = lines[i + 1].strip()
             
-            # Muster: Portugiesisch (erste Zeile) → Deutsch (zweite Zeile)
-            # Portugiesisch beginnt meist mit Kleinbuchstaben (außer Eigennamen)
-            # oder hat portugiesische Artikel (a, o, as, os)
-            is_portuguese = (
-                line.startswith(('a ', 'o ', 'as ', 'os ', 'um ', 'uma ')) or
-                line[0].islower() or
-                any(char in line for char in ['ã', 'õ', 'ç', 'á', 'é', 'í', 'ó', 'ú'])
-            )
+            # Skip wenn beide Zeilen leer oder zu kurz sind
+            if not next_line or len(line) < 2:
+                i += 1
+                continue
             
-            # Deutsch beginnt meist mit Großbuchstaben (Substantive)
-            # oder hat deutsche Artikel (der, die, das, den, dem, ein, eine)
-            is_german = next_line.startswith(('der ', 'die ', 'das ', 'den ', 'dem ', 
-                                               'ein ', 'eine ', 'einen ', 'einem ',
-                                               'Der ', 'Die ', 'Das '))
+            # Deutsche Indikatoren
+            has_german_article = next_line.startswith(('der ', 'die ', 'das ', 'den ', 'dem ', 
+                                                        'ein ', 'eine ', 'einen ', 'einem ',
+                                                        'Der ', 'Die ', 'Das '))
+            has_german_chars = any(char in next_line for char in ['ä', 'ö', 'ü', 'ß'])
             
-            # Wenn wir ein Paar gefunden haben
-            if is_portuguese or (not line[0].isupper() and next_line[0].isupper()):
-                portuguese = line
-                german = next_line
-                vocabulary.append((german, portuguese))
-                i += 2  # Überspringe beide Zeilen
+            # Portugiesische Indikatoren
+            has_portuguese_article = line.startswith(('a ', 'o ', 'as ', 'os ', 'um ', 'uma '))
+            has_portuguese_chars = any(char in line for char in ['ã', 'õ', 'ç', 'á', 'é', 'í', 'ó', 'ú'])
+            starts_lowercase = line[0].islower()
+            
+            # Heuristik: Ist es wahrscheinlich ein Vokabelpaar?
+            # Fall 1: Klare portugiesische und deutsche Merkmale
+            if (has_portuguese_article or has_portuguese_chars or starts_lowercase) and \
+               (has_german_article or has_german_chars):
+                vocabulary.append((next_line, line))
+                i += 2
+                continue
+            
+            # Fall 2: Keine speziellen Merkmale, aber strukturell passend
+            # (z.B. "Oi!" und "Hallo!" - beide kurze Ausrufe)
+            # Prüfe ob es aussieht wie ein Vokabelpaar (ähnliche Länge, keine Footer-Keywords)
+            is_not_navigation = not any(keyword in line for keyword in 
+                                       ['Lernen mit', 'Babbel', 'Karriere', 'Imprint', 'AGB'])
+            is_not_navigation2 = not any(keyword in next_line for keyword in 
+                                        ['Lernen mit', 'Babbel', 'Karriere', 'Imprint', 'AGB'])
+            
+            # Wenn beide Zeilen kurz sind (unter 50 Zeichen) und keine Navigation
+            if len(line) < 50 and len(next_line) < 50 and is_not_navigation and is_not_navigation2:
+                # Annahme: Erste Zeile = Portugiesisch, Zweite = Deutsch
+                vocabulary.append((next_line, line))
+                i += 2
                 continue
         
         i += 1
     
     return vocabulary
+
+
+def process_files(file_paths):
+    """
+    Verarbeitet mehrere Textdateien und extrahiert alle Vokabeln.
+    
+    Args:
+        file_paths: Liste von Pfaden zu Textdateien
+        
+    Returns:
+        Liste von eindeutigen Tupeln (deutsch, portugiesisch)
+    """
+    all_vocabulary = []
+    
+    for file_path in file_paths:
+        print(f"Verarbeite: {file_path}")
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text_content = f.read()
+            
+            vocab = extract_vocabulary(text_content)
+            all_vocabulary.extend(vocab)
+            print(f"  → {len(vocab)} Vokabelpaare gefunden")
+        except Exception as e:
+            print(f"  ✗ Fehler: {e}")
+    
+    # Entferne Duplikate und sortiere alphabetisch
+    unique_vocabulary = sorted(set(all_vocabulary), key=lambda x: x[0].lower())
+    
+    duplicates_removed = len(all_vocabulary) - len(unique_vocabulary)
+    
+    print(f"\nGesamt: {len(all_vocabulary)} Vokabelpaare")
+    print(f"Duplikate entfernt: {duplicates_removed}")
+    print(f"Eindeutige Vokabeln: {len(unique_vocabulary)}")
+    
+    return unique_vocabulary
 
 
 def save_to_csv(vocabulary, output_file):
@@ -92,43 +144,87 @@ def save_to_csv(vocabulary, output_file):
         writer.writerow(['Deutsch', 'Portugiesisch'])
         writer.writerows(vocabulary)
     
-    print(f"✓ {len(vocabulary)} Vokabelpaare wurden in '{output_file}' gespeichert.")
+    print(f"\n✓ {len(vocabulary)} Vokabeln wurden in '{output_file}' gespeichert.")
+
+
+def select_files_dialog():
+    """
+    Öffnet einen Dateiauswahl-Dialog.
+    
+    Returns:
+        Liste von ausgewählten Dateipfaden
+    """
+    root = Tk()
+    root.withdraw()  # Verstecke das Hauptfenster
+    root.attributes('-topmost', True)  # Bringe Dialog nach vorne
+    
+    file_paths = filedialog.askopenfilenames(
+        title='Wähle Babbel-Textdateien aus',
+        filetypes=[
+            ('Textdateien', '*.txt'),
+            ('Alle Dateien', '*.*')
+        ]
+    )
+    
+    root.destroy()
+    return list(file_paths)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Extrahiert deutsch-portugiesische Vokabeln aus kopierten Babbel-Texten.'
+        description='Extrahiert Vokabeln aus mehreren Babbel-Textdateien und erstellt eine CSV.'
     )
     parser.add_argument(
-        'input_file',
-        help='Pfad zur Text-Eingabedatei (kopierter Inhalt von Babbel)'
+        'input_files',
+        nargs='*',
+        help='Textdateien zum Verarbeiten (optional, ohne Angabe öffnet sich ein Dialog)'
     )
     parser.add_argument(
         '-o', '--output',
-        default='vokabeln.csv',
-        help='Name der CSV-Ausgabedatei (Standard: vokabeln.csv)'
+        default='alle_vokabeln.csv',
+        help='Name der CSV-Ausgabedatei (Standard: alle_vokabeln.csv)'
+    )
+    parser.add_argument(
+        '-g', '--gui',
+        action='store_true',
+        help='Dateiauswahl-Dialog öffnen (auch wenn Dateien angegeben wurden)'
     )
     
     args = parser.parse_args()
     
-    # Eingabedatei lesen
-    input_path = Path(args.input_file)
-    if not input_path.exists():
-        print(f"✗ Fehler: Datei '{args.input_file}' wurde nicht gefunden.")
+    # Bestimme welche Dateien verarbeitet werden sollen
+    if args.gui or not args.input_files:
+        print("Öffne Dateiauswahl-Dialog...")
+        file_paths = select_files_dialog()
+        if not file_paths:
+            print("Keine Dateien ausgewählt. Abbruch.")
+            return 1
+    else:
+        file_paths = args.input_files
+    
+    # Prüfe ob Dateien existieren
+    valid_files = []
+    for file_path in file_paths:
+        path = Path(file_path)
+        if not path.exists():
+            print(f"✗ Warnung: Datei '{file_path}' nicht gefunden, wird übersprungen.")
+        else:
+            valid_files.append(path)
+    
+    if not valid_files:
+        print("✗ Fehler: Keine gültigen Dateien gefunden.")
         return 1
     
-    print(f"Lese Datei: {args.input_file}")
-    with open(input_path, 'r', encoding='utf-8') as f:
-        text_content = f.read()
+    print(f"\nVerarbeite {len(valid_files)} Datei(en)...\n")
     
-    # Vokabeln extrahieren
-    vocabulary = extract_vocabulary(text_content)
+    # Verarbeite alle Dateien
+    vocabulary = process_files(valid_files)
     
     if not vocabulary:
-        print("⚠ Warnung: Keine Vokabeln gefunden!")
+        print("✗ Fehler: Keine Vokabeln gefunden.")
         return 1
     
-    # CSV speichern
+    # Speichere das Ergebnis
     save_to_csv(vocabulary, args.output)
     
     # Zeige erste 5 Einträge als Vorschau
